@@ -279,7 +279,33 @@ func (op Token) Precedence() int {
 var keywords map[string]Token
 
 func init() {
-	keywords = make(map[string]Token)
+	keywords = map[string]Token{
+		"跳出":  BREAK,
+		"为":   CASE,
+		"管道":  CHAN,
+		"常量":  CONST,
+		"继续":  CONTINUE,
+		"为其他": DEFAULT,
+		"推迟":  DEFER,
+		"否则":  ELSE,
+		"贯穿":  FALLTHROUGH,
+		"循环":  FOR,
+		"函数":  FUNC,
+		"异步":  GO,
+		"跳转":  GOTO,
+		"如果":  IF,
+		"导入":  IMPORT,
+		"接口":  INTERFACE,
+		"映射表": MAP,
+		"包":   PACKAGE,
+		"范围":  RANGE,
+		"返回":  RETURN,
+		"选择":  SELECT,
+		"类":   STRUCT,
+		"假如":  SWITCH,
+		"类型":  TYPE,
+		"变量":  VAR,
+	}
 	for i := keyword_beg + 1; i < keyword_end; i++ {
 		keywords[tokens[i]] = i
 	}
@@ -288,7 +314,7 @@ func init() {
 // Lookup maps an identifier to its keyword token or IDENT (if not a keyword).
 //
 func Lookup(ident string) Token {
-	if tok, is_keyword := keywords[ident]; is_keyword {
+	if tok, ok := keywords[ident]; ok {
 		return tok
 	}
 	return IDENT

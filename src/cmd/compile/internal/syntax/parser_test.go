@@ -26,6 +26,7 @@ var (
 )
 
 func TestParse(t *testing.T) {
+	t.Fatal(_Package.String())
 	ParseFile(*src_, func(err error) { t.Error(err) }, nil, AllowGenerics)
 }
 

@@ -6,8 +6,8 @@
 // Go source. After initialization, consecutive calls of
 // next advance the scanner one token at a time.
 //
-// This file, source.go, tokens.go, and token_string.go are self-contained
-// (`go tool compile scanner.go source.go tokens.go token_string.go` compiles)
+// This file, source.go, tokens.go, and token_go_string.go are self-contained
+// (`go tool compile scanner.go source.go tokens.go token_go_string.go` compiles)
 // and thus could be made into their own package.
 
 package syntax
@@ -379,24 +379,16 @@ func (s *scanner) ident() {
 	}
 
 	// possibly a keyword
-	lit := s.segment()
-	if len(lit) >= 2 {
-		if tok := keywordMap[hash(lit)]; tok != 0 && tokStrFast(tok) == string(lit) {
-			s.nlsemi = contains(1<<_Break|1<<_Continue|1<<_Fallthrough|1<<_Return, tok)
-			s.tok = tok
-			return
-		}
+	lit := string(s.segment())
+	if tok, ok := keywordMap[lit]; ok {
+		s.nlsemi = contains(1<<_Break|1<<_Continue|1<<_Fallthrough|1<<_Return, tok)
+		s.tok = tok
+		return
 	}
 
 	s.nlsemi = true
-	s.lit = string(lit)
+	s.lit = lit
 	s.tok = _Name
-}
-
-// tokStrFast is a faster version of token.String, which assumes that tok
-// is one of the valid tokens - and can thus skip bounds checks.
-func tokStrFast(tok token) string {
-	return _token_name[_token_index[tok-1]:_token_index[tok]]
 }
 
 func (s *scanner) atIdentChar(first bool) bool {
@@ -415,22 +407,13 @@ func (s *scanner) atIdentChar(first bool) bool {
 	return true
 }
 
-// hash is a perfect hash function for keywords.
-// It assumes that s has at least length 2.
-func hash(s []byte) uint {
-	return (uint(s[0])<<4 ^ uint(s[1]) + uint(len(s))) & uint(len(keywordMap)-1)
-}
-
-var keywordMap [1 << 6]token // size must be power of two
+var keywordMap = make(map[string]token) // size must be power of two
 
 func init() {
 	// populate keywordMap
 	for tok := _Break; tok <= _Var; tok++ {
-		h := hash([]byte(tok.String()))
-		if keywordMap[h] != 0 {
-			panic("imperfect hash")
-		}
-		keywordMap[h] = tok
+		keywordMap[tok.String()] = tok
+		keywordMap[tok.GoString()] = tok
 	}
 }
 

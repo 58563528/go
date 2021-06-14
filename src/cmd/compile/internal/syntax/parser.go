@@ -380,7 +380,6 @@ func (p *parser) fileOrNil() *File {
 
 	f := new(File)
 	f.pos = p.pos()
-
 	// PackageClause
 	if !p.got(_Package) {
 		p.syntaxError("package statement must be first")

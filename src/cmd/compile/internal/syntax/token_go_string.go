@@ -57,14 +57,14 @@ func _() {
 	_ = x[tokenCount-47]
 }
 
-const _token_name = "EOFnameliteralopop=opop=:=<-*([{)]},;:....跳出为管道常量继续为其他推迟否则贯穿循环函数异步跳转如果导入接口映射表包范围返回选择类假如类型变量"
+const _token_go_name = "EOFnameliteralopop=opop=:=<-*([{)]},;:....breakcasechanconstcontinuedefaultdeferelsefallthroughforfuncgogotoifimportinterfacemappackagerangereturnselectstructswitchtypevar"
 
-var _token_index = [...]uint8{0, 3, 7, 14, 16, 19, 23, 24, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 42, 48, 51, 57, 63, 69, 78, 84, 90, 96, 102, 108, 114, 120, 126, 132, 138, 147, 150, 156, 162, 168, 171, 177, 183, 189, 189}
+var _token_go_index = [...]uint8{0, 3, 7, 14, 16, 19, 23, 24, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 42, 47, 51, 55, 60, 68, 75, 80, 84, 95, 98, 102, 104, 108, 110, 116, 125, 128, 135, 140, 146, 152, 158, 164, 168, 171, 171}
 
-func (i token) String() string {
+func (i token) GoString() string {
 	i -= 1
-	if i >= token(len(_token_index)-1) {
+	if i >= token(len(_token_go_index)-1) {
 		return "token(" + strconv.FormatInt(int64(i+1), 10) + ")"
 	}
-	return _token_name[_token_index[i]:_token_index[i+1]]
+	return _token_go_name[_token_go_index[i]:_token_go_index[i+1]]
 }

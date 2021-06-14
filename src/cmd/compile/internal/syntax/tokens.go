@@ -40,31 +40,31 @@ const (
 	_DotDotDot // ...
 
 	// keywords
-	_Break       // break
-	_Case        // case
-	_Chan        // chan
-	_Const       // const
-	_Continue    // continue
-	_Default     // default
-	_Defer       // defer
-	_Else        // else
-	_Fallthrough // fallthrough
-	_For         // for
-	_Func        // func
-	_Go          // go
-	_Goto        // goto
-	_If          // if
-	_Import      // import
-	_Interface   // interface
-	_Map         // map
-	_Package     // package
-	_Range       // range
-	_Return      // return
-	_Select      // select
-	_Struct      // struct
-	_Switch      // switch
-	_Type        // type
-	_Var         // var
+	_Break       // 跳出
+	_Case        // 为
+	_Chan        // 管道
+	_Const       // 常量
+	_Continue    // 继续
+	_Default     // 为其他
+	_Defer       // 推迟
+	_Else        // 否则
+	_Fallthrough // 贯穿
+	_For         // 循环
+	_Func        // 函数
+	_Go          // 异步
+	_Goto        // 跳转
+	_If          // 如果
+	_Import      // 导入
+	_Interface   // 接口
+	_Map         // 映射表
+	_Package     // 包
+	_Range       // 范围
+	_Return      // 返回
+	_Select      // 选择
+	_Struct      // 类
+	_Switch      // 假如
+	_Type        // 类型
+	_Var         // 变量
 
 	// empty line comment to exclude it from .String
 	tokenCount //
