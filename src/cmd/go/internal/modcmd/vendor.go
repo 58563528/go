@@ -24,7 +24,7 @@ import (
 	"cmd/go/internal/imports"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modload"
-	"cmd/go/internal/str"
+	"cmd/internal/str"
 
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
@@ -74,7 +74,7 @@ func runVendor(ctx context.Context, cmd *base.Command, args []string) {
 	}
 	_, pkgs := modload.LoadPackages(ctx, loadOpts, "all")
 
-	vdir := filepath.Join(modload.ModRoot(), "vendor")
+	vdir := filepath.Join(modload.VendorDir())
 	if err := os.RemoveAll(vdir); err != nil {
 		base.Fatalf("go mod vendor: %v", err)
 	}
@@ -82,7 +82,7 @@ func runVendor(ctx context.Context, cmd *base.Command, args []string) {
 	modpkgs := make(map[module.Version][]string)
 	for _, pkg := range pkgs {
 		m := modload.PackageModule(pkg)
-		if m.Path == "" || m == modload.Target {
+		if m.Path == "" || m.Version == "" && modload.MainModules.Contains(m.Path) {
 			continue
 		}
 		modpkgs[m] = append(modpkgs[m], pkg)
@@ -128,7 +128,8 @@ func runVendor(ctx context.Context, cmd *base.Command, args []string) {
 	}
 
 	for _, m := range vendorMods {
-		line := moduleLine(m, modload.Replacement(m))
+		replacement, _ := modload.Replacement(m)
+		line := moduleLine(m, replacement)
 		io.WriteString(w, line)
 
 		goVersion := ""
@@ -242,7 +243,7 @@ func vendorPkg(vdir, pkg string) {
 	if err != nil {
 		if errors.As(err, &noGoError) {
 			return // No source files in this package are built. Skip embeds in ignored files.
-		} else if !errors.As(err, &multiplePackageError) { // multiplePackgeErrors are okay, but others are not.
+		} else if !errors.As(err, &multiplePackageError) { // multiplePackageErrors are OK, but others are not.
 			base.Fatalf("internal error: failed to find embedded files of %s: %v\n", pkg, err)
 		}
 	}
