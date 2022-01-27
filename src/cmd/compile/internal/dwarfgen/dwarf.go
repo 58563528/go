@@ -150,6 +150,19 @@ func createDwarfVars(fnsym *obj.LSym, complexOK bool, fn *ir.Func, apDecls []*ir
 	dcl := apDecls
 	if fnsym.WasInlined() {
 		dcl = preInliningDcls(fnsym)
+	} else {
+		// The backend's stackframe pass prunes away entries from the
+		// fn's Dcl list, including PARAMOUT nodes that correspond to
+		// output params passed in registers. Add back in these
+		// entries here so that we can process them properly during
+		// DWARF-gen. See issue 48573 for more details.
+		debugInfo := fn.DebugInfo.(*ssa.FuncDebug)
+		for _, n := range debugInfo.RegOutputParams {
+			if n.Class != ir.PPARAMOUT || !n.IsOutputParamInRegisters() {
+				panic("invalid ir.Name on debugInfo.RegOutputParams list")
+			}
+			dcl = append(dcl, n)
+		}
 	}
 
 	// If optimization is enabled, the list above will typically be
@@ -217,6 +230,7 @@ func createDwarfVars(fnsym *obj.LSym, complexOK bool, fn *ir.Func, apDecls []*ir
 			DeclCol:       declpos.RelCol(),
 			InlIndex:      int32(inlIndex),
 			ChildIndex:    -1,
+			DictIndex:     n.DictIndex,
 		})
 		// Record go type of to insure that it gets emitted by the linker.
 		fnsym.Func().RecordAutoType(reflectdata.TypeLinksym(n.Type()))
@@ -374,6 +388,7 @@ func createSimpleVar(fnsym *obj.LSym, n *ir.Name) *dwarf.Var {
 		DeclCol:       declpos.RelCol(),
 		InlIndex:      int32(inlIndex),
 		ChildIndex:    -1,
+		DictIndex:     n.DictIndex,
 	}
 }
 
@@ -478,6 +493,7 @@ func createComplexVar(fnsym *obj.LSym, fn *ir.Func, varID ssa.VarID) *dwarf.Var 
 		DeclCol:     declpos.RelCol(),
 		InlIndex:    int32(inlIndex),
 		ChildIndex:  -1,
+		DictIndex:   n.DictIndex,
 	}
 	list := debug.LocationLists[varID]
 	if len(list) != 0 {

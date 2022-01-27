@@ -27,14 +27,13 @@ func TestSizeof(t *testing.T) {
 		{Pointer{}, 8, 16},
 		{Tuple{}, 12, 24},
 		{Signature{}, 28, 56},
-		{Union{}, 16, 32},
-		{Interface{}, 40, 80},
+		{Union{}, 12, 24},
+		{Interface{}, 44, 88},
 		{Map{}, 16, 32},
 		{Chan{}, 12, 24},
-		{Named{}, 72, 136},
+		{Named{}, 56, 104},
 		{TypeParam{}, 28, 48},
 		{term{}, 12, 24},
-		{top{}, 0, 0},
 
 		// Objects
 		{PkgName{}, 64, 104},

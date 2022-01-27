@@ -5,7 +5,6 @@
 package noder
 
 import (
-	"bytes"
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
@@ -27,6 +26,8 @@ func (g *irgen) pkg(pkg *types2.Package) *types.Pkg {
 	return types.NewPkg(pkg.Path(), pkg.Name())
 }
 
+var universeAny = types2.Universe.Lookup("any").Type()
+
 // typ converts a types2.Type to a types.Type, including caching of previously
 // translated types.
 func (g *irgen) typ(typ types2.Type) *types.Type {
@@ -43,7 +44,9 @@ func (g *irgen) typ(typ types2.Type) *types.Type {
 		l := len(g.typesToFinalize)
 		info := g.typesToFinalize[l-1]
 		g.typesToFinalize = g.typesToFinalize[:l-1]
+		types.DeferCheckSize()
 		g.fillinMethods(info.typ, info.ntyp)
+		types.ResumeCheckSize()
 	}
 	return res
 }
@@ -52,6 +55,12 @@ func (g *irgen) typ(typ types2.Type) *types.Type {
 // constructed part of a recursive type. Should not be called from outside this
 // file (g.typ is the "external" entry point).
 func (g *irgen) typ1(typ types2.Type) *types.Type {
+	// See issue 49583: the type checker has trouble keeping track of aliases,
+	// but for such a common alias as any we can improve things by preserving a
+	// pointer identity that can be checked when formatting type strings.
+	if typ == universeAny {
+		return types.AnyType
+	}
 	// Cache type2-to-type mappings. Important so that each defined generic
 	// type (instantiated or not) has a single types.Type representation.
 	// Also saves a lot of computation and memory by avoiding re-translating
@@ -72,29 +81,12 @@ func (g *irgen) typ1(typ types2.Type) *types.Type {
 
 // instTypeName2 creates a name for an instantiated type, base on the type args
 // (given as types2 types).
-func instTypeName2(name string, targs *types2.TypeList) string {
-	b := bytes.NewBufferString(name)
-	b.WriteByte('[')
-	n := targs.Len()
-	for i := 0; i < n; i++ {
-		targ := targs.At(i)
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		// Include package names for all types, including typeparams, to
-		// make sure type arguments are uniquely specified.
-		tname := types2.TypeString(targ,
-			func(pkg *types2.Package) string { return pkg.Name() })
-		if strings.Index(tname, ", ") >= 0 {
-			// types2.TypeString puts spaces after a comma in a type
-			// list, but we don't want spaces in our actual type names
-			// and method/function names derived from them.
-			tname = strings.Replace(tname, ", ", ",", -1)
-		}
-		b.WriteString(tname)
+func (g *irgen) instTypeName2(name string, targs *types2.TypeList) string {
+	rparams := make([]*types.Type, targs.Len())
+	for i := range rparams {
+		rparams[i] = g.typ(targs.At(i))
 	}
-	b.WriteByte(']')
-	return b.String()
+	return typecheck.InstTypeName(name, rparams)
 }
 
 // typ0 converts a types2.Type to a types.Type, but doesn't do the caching check
@@ -109,7 +101,7 @@ func (g *irgen) typ0(typ types2.Type) *types.Type {
 		// since that is the only use of a generic type that doesn't
 		// involve instantiation. We just translate the named type in the
 		// normal way below using g.obj().
-		if typ.TParams() != nil && typ.TArgs() != nil {
+		if typ.TypeParams() != nil && typ.TypeArgs() != nil {
 			// typ is an instantiation of a defined (named) generic type.
 			// This instantiation should also be a defined (named) type.
 			// types2 gives us the substituted type in t.Underlying()
@@ -119,8 +111,17 @@ func (g *irgen) typ0(typ types2.Type) *types.Type {
 			//
 			// When converted to types.Type, typ has a unique name,
 			// based on the names of the type arguments.
-			instName := instTypeName2(typ.Obj().Name(), typ.TArgs())
+			instName := g.instTypeName2(typ.Obj().Name(), typ.TypeArgs())
 			s := g.pkg(typ.Obj().Pkg()).Lookup(instName)
+
+			// Make sure the base generic type exists in type1 (it may
+			// not yet if we are referecing an imported generic type, as
+			// opposed to a generic type declared in this package). Make
+			// sure to do this lookup before checking s.Def, in case
+			// s.Def gets defined while importing base (if an imported
+			// type). (Issue #50486).
+			base := g.obj(typ.Origin().Obj())
+
 			if s.Def != nil {
 				// We have already encountered this instantiation.
 				// Use the type we previously created, since there
@@ -128,10 +129,13 @@ func (g *irgen) typ0(typ types2.Type) *types.Type {
 				return s.Def.Type()
 			}
 
-			// Make sure the base generic type exists in type1 (it may
-			// not yet if we are referecing an imported generic type, as
-			// opposed to a generic type declared in this package).
-			_ = g.obj(typ.Orig().Obj())
+			if base.Class == ir.PAUTO {
+				// If the base type is a local type, we want to pop
+				// this instantiated type symbol/definition when we
+				// leave the containing block, so we don't use it
+				// incorrectly later.
+				types.Pushdcl(s)
+			}
 
 			// Create a forwarding type first and put it in the g.typs
 			// map, in order to deal with recursive generic types
@@ -153,7 +157,7 @@ func (g *irgen) typ0(typ types2.Type) *types.Type {
 			// non-generic types used to instantiate this type. We'll
 			// use these when instantiating the methods of the
 			// instantiated type.
-			targs := typ.TArgs()
+			targs := typ.TypeArgs()
 			rparams := make([]*types.Type, targs.Len())
 			for i := range rparams {
 				rparams[i] = g.typ1(targs.At(i))
@@ -229,13 +233,20 @@ func (g *irgen) typ0(typ types2.Type) *types.Type {
 			methods[i] = types.NewField(g.pos(m), g.selector(m), mtyp)
 		}
 
-		return types.NewInterface(g.tpkg(typ), append(embeddeds, methods...))
+		return types.NewInterface(g.tpkg(typ), append(embeddeds, methods...), typ.IsImplicit())
 
 	case *types2.TypeParam:
 		// Save the name of the type parameter in the sym of the type.
 		// Include the types2 subscript in the sym name
 		pkg := g.tpkg(typ)
-		sym := pkg.Lookup(types2.TypeString(typ, func(*types2.Package) string { return "" }))
+		// Create the unique types1 name for a type param, using its context
+		// with a function, type, or method declaration. Also, map blank type
+		// param names to a unique name based on their type param index. The
+		// unique blank names will be exported, but will be reverted during
+		// types2 and gcimporter import.
+		assert(g.curDecl != "")
+		nm := typecheck.TparamExportName(g.curDecl, typ.Obj().Name(), typ.Index())
+		sym := pkg.Lookup(nm)
 		if sym.Def != nil {
 			// Make sure we use the same type param type for the same
 			// name, whether it is created during types1-import or
@@ -290,7 +301,7 @@ func (g *irgen) typ0(typ types2.Type) *types.Type {
 // instantiated types, and for actually generating the methods for instantiated
 // types.
 func (g *irgen) fillinMethods(typ *types2.Named, ntyp *types.Type) {
-	targs2 := typ.TArgs()
+	targs2 := typ.TypeArgs()
 	targs := make([]*types.Type, targs2.Len())
 	for i := range targs {
 		targs[i] = g.typ1(targs2.At(i))
@@ -301,20 +312,25 @@ func (g *irgen) fillinMethods(typ *types2.Named, ntyp *types.Type) {
 		m := typ.Method(i)
 		recvType := deref2(types2.AsSignature(m.Type()).Recv().Type())
 		var meth *ir.Name
+		imported := false
 		if m.Pkg() != g.self {
 			// Imported methods cannot be loaded by name (what
 			// g.obj() does) - they must be loaded via their
 			// type.
 			meth = g.obj(recvType.(*types2.Named).Obj()).Type().Methods().Index(i).Nname.(*ir.Name)
+			// XXX Because Obj() returns the object of the base generic
+			// type, we have to still do the method translation below.
+			imported = true
 		} else {
 			meth = g.obj(m)
 		}
-		if recvType != types2.Type(typ) {
+		assert(recvType == types2.Type(typ))
+		if imported {
 			// Unfortunately, meth is the type of the method of the
 			// generic type, so we have to do a substitution to get
 			// the name/type of the method of the instantiated type,
 			// using m.Type().RParams() and typ.TArgs()
-			inst2 := instTypeName2("", typ.TArgs())
+			inst2 := g.instTypeName2("", typ.TypeArgs())
 			name := meth.Sym().Name
 			i1 := strings.Index(name, "[")
 			i2 := strings.Index(name[i1:], "]")
@@ -327,11 +343,19 @@ func (g *irgen) fillinMethods(typ *types2.Named, ntyp *types.Type) {
 				meth2 = newsym.Def.(*ir.Name)
 			} else {
 				meth2 = ir.NewNameAt(meth.Pos(), newsym)
-				rparams := types2.AsSignature(m.Type()).RParams()
+				rparams := types2.AsSignature(m.Type()).RecvTypeParams()
 				tparams := make([]*types.Type, rparams.Len())
+				// Set g.curDecl to be the method context, so type
+				// params in the receiver of the method that we are
+				// translating gets the right unique name. We could
+				// be in a top-level typeDecl, so save and restore
+				// the current contents of g.curDecl.
+				savedCurDecl := g.curDecl
+				g.curDecl = typ.Obj().Name() + "." + m.Name()
 				for i := range tparams {
 					tparams[i] = g.typ1(rparams.At(i))
 				}
+				g.curDecl = savedCurDecl
 				assert(len(tparams) == len(targs))
 				ts := typecheck.Tsubster{
 					Tparams: tparams,
@@ -339,10 +363,6 @@ func (g *irgen) fillinMethods(typ *types2.Named, ntyp *types.Type) {
 				}
 				// Do the substitution of the type
 				meth2.SetType(ts.Typ(meth.Type()))
-				// Add any new fully instantiated types
-				// seen during the substitution to
-				// g.instTypeList.
-				g.instTypeList = append(g.instTypeList, ts.InstTypeList...)
 				newsym.Def = meth2
 			}
 			meth = meth2
@@ -353,12 +373,12 @@ func (g *irgen) fillinMethods(typ *types2.Named, ntyp *types.Type) {
 	ntyp.Methods().Set(methods)
 	if !ntyp.HasTParam() && !ntyp.HasShape() {
 		// Generate all the methods for a new fully-instantiated type.
-		g.instTypeList = append(g.instTypeList, ntyp)
+		typecheck.NeedInstType(ntyp)
 	}
 }
 
 func (g *irgen) signature(recv *types.Field, sig *types2.Signature) *types.Type {
-	tparams2 := sig.TParams()
+	tparams2 := sig.TypeParams()
 	tparams := make([]*types.Field, tparams2.Len())
 	for i := range tparams {
 		tp := tparams2.At(i).Obj()

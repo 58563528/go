@@ -13,8 +13,10 @@ import (
 	"cmd/internal/src"
 )
 
+// stmts creates nodes for a slice of statements that form a scope.
 func (g *irgen) stmts(stmts []syntax.Stmt) []ir.Node {
 	var nodes []ir.Node
+	types.Markdcl()
 	for _, stmt := range stmts {
 		switch s := g.stmt(stmt).(type) {
 		case nil: // EmptyStmt
@@ -24,6 +26,7 @@ func (g *irgen) stmts(stmts []syntax.Stmt) []ir.Node {
 			nodes = append(nodes, s)
 		}
 	}
+	types.Popdcl()
 	return nodes
 }
 
@@ -37,19 +40,21 @@ func (g *irgen) stmt(stmt syntax.Stmt) ir.Node {
 	case *syntax.BlockStmt:
 		return ir.NewBlockStmt(g.pos(stmt), g.blockStmt(stmt))
 	case *syntax.ExprStmt:
-		return g.expr(stmt.X)
+		return wrapname(g.pos(stmt.X), g.expr(stmt.X))
 	case *syntax.SendStmt:
 		n := ir.NewSendStmt(g.pos(stmt), g.expr(stmt.Chan), g.expr(stmt.Value))
-		if n.Chan.Type().HasTParam() || n.Value.Type().HasTParam() {
-			// Delay transforming the send if the channel or value
-			// have a type param.
-			n.SetTypecheck(3)
-			return n
+		if !g.delayTransform() {
+			transformSend(n)
 		}
-		transformSend(n)
 		n.SetTypecheck(1)
 		return n
 	case *syntax.DeclStmt:
+		if g.topFuncIsGeneric && len(stmt.DeclList) > 0 {
+			if _, ok := stmt.DeclList[0].(*syntax.TypeDecl); ok {
+				// TODO: remove this restriction. See issue 47631.
+				base.ErrorfAt(g.pos(stmt), "type declarations inside generic functions are not currently supported")
+			}
+		}
 		n := ir.NewBlockStmt(g.pos(stmt), nil)
 		g.decls(&n.List, stmt.DeclList)
 		return n
@@ -66,11 +71,9 @@ func (g *irgen) stmt(stmt syntax.Stmt) ir.Node {
 				lhs := g.expr(stmt.Lhs)
 				n = ir.NewAssignOpStmt(g.pos(stmt), op, lhs, rhs)
 			}
-			if n.X.Typecheck() == 3 {
-				n.SetTypecheck(3)
-				return n
+			if !g.delayTransform() {
+				transformAsOp(n)
 			}
-			transformAsOp(n)
 			n.SetTypecheck(1)
 			return n
 		}
@@ -79,46 +82,24 @@ func (g *irgen) stmt(stmt syntax.Stmt) ir.Node {
 		rhs := g.exprList(stmt.Rhs)
 		names, lhs := g.assignList(stmt.Lhs, stmt.Op == syntax.Def)
 
-		// We must delay transforming the assign statement if any of the
-		// lhs or rhs nodes are also delayed, since transformAssign needs
-		// to know the types of the left and right sides in various cases.
-		delay := false
-		for _, e := range lhs {
-			if e.Typecheck() == 3 {
-				delay = true
-				break
-			}
-		}
-		for _, e := range rhs {
-			if e.Typecheck() == 3 {
-				delay = true
-				break
-			}
-		}
-
 		if len(lhs) == 1 && len(rhs) == 1 {
 			n := ir.NewAssignStmt(g.pos(stmt), lhs[0], rhs[0])
 			n.Def = initDefn(n, names)
 
-			if delay {
-				n.SetTypecheck(3)
-				return n
+			if !g.delayTransform() {
+				lhs, rhs := []ir.Node{n.X}, []ir.Node{n.Y}
+				transformAssign(n, lhs, rhs)
+				n.X, n.Y = lhs[0], rhs[0]
 			}
-
-			lhs, rhs := []ir.Node{n.X}, []ir.Node{n.Y}
-			transformAssign(n, lhs, rhs)
-			n.X, n.Y = lhs[0], rhs[0]
 			n.SetTypecheck(1)
 			return n
 		}
 
 		n := ir.NewAssignListStmt(g.pos(stmt), ir.OAS2, lhs, rhs)
 		n.Def = initDefn(n, names)
-		if delay {
-			n.SetTypecheck(3)
-			return n
+		if !g.delayTransform() {
+			transformAssign(n, n.Lhs, n.Rhs)
 		}
-		transformAssign(n, n.Lhs, n.Rhs)
 		n.SetTypecheck(1)
 		return n
 
@@ -128,21 +109,9 @@ func (g *irgen) stmt(stmt syntax.Stmt) ir.Node {
 		return ir.NewGoDeferStmt(g.pos(stmt), g.tokOp(int(stmt.Tok), callOps[:]), g.expr(stmt.Call))
 	case *syntax.ReturnStmt:
 		n := ir.NewReturnStmt(g.pos(stmt), g.exprList(stmt.Results))
-		for _, e := range n.Results {
-			if e.Type().HasTParam() {
-				// Delay transforming the return statement if any of the
-				// return values have a type param.
-				if !ir.HasNamedResults(ir.CurFunc) {
-					transformArgs(n)
-					// But add CONVIFACE nodes where needed if
-					// any of the return values have interface type.
-					typecheckaste(ir.ORETURN, nil, false, ir.CurFunc.Type().Results(), n.Results, true)
-				}
-				n.SetTypecheck(3)
-				return n
-			}
+		if !g.delayTransform() {
+			transformReturn(n)
 		}
-		transformReturn(n)
 		n.SetTypecheck(1)
 		return n
 	case *syntax.IfStmt:
@@ -151,7 +120,10 @@ func (g *irgen) stmt(stmt syntax.Stmt) ir.Node {
 		return g.forStmt(stmt)
 	case *syntax.SelectStmt:
 		n := g.selectStmt(stmt)
-		transformSelect(n.(*ir.SelectStmt))
+
+		if !g.delayTransform() {
+			transformSelect(n.(*ir.SelectStmt))
+		}
 		n.SetTypecheck(1)
 		return n
 	case *syntax.SwitchStmt:
@@ -327,6 +299,8 @@ func (g *irgen) switchStmt(stmt *syntax.SwitchStmt) ir.Node {
 		if obj, ok := g.info.Implicits[clause]; ok {
 			cv = g.obj(obj)
 			cv.SetPos(g.makeXPos(clause.Colon))
+			assert(expr.Op() == ir.OTYPESW)
+			cv.Defn = expr
 		}
 		body[i] = ir.NewCaseStmt(g.pos(clause), g.exprList(clause.Cases), g.stmts(clause.Body))
 		body[i].Var = cv

@@ -250,7 +250,8 @@ func (n *ConstExpr) Val() constant.Value { return n.val }
 // It may end up being a value or a type.
 type ConvExpr struct {
 	miniExpr
-	X Node
+	X           Node
+	NonEscaping bool // The allocation needed for the conversion to interface is known not to escape
 }
 
 func NewConvExpr(pos src.XPos, op Op, typ *types.Type, x Node) *ConvExpr {
@@ -570,11 +571,10 @@ func (*SelectorExpr) CanBeNtype() {}
 // A SliceExpr is a slice expression X[Low:High] or X[Low:High:Max].
 type SliceExpr struct {
 	miniExpr
-	X            Node
-	Low          Node
-	High         Node
-	Max          Node
-	CheckPtrCall *CallExpr `mknode:"-"`
+	X    Node
+	Low  Node
+	High Node
+	Max  Node
 }
 
 func NewSliceExpr(pos src.XPos, op Op, x, low, high, max Node) *SliceExpr {

@@ -209,7 +209,7 @@ type eface struct {
 	data  unsafe.Pointer
 }
 
-func efaceOf(ep *interface{}) *eface {
+func efaceOf(ep *any) *eface {
 	return (*eface)(unsafe.Pointer(ep))
 }
 
@@ -255,6 +255,8 @@ func efaceOf(ep *interface{}) *eface {
 // so I can't see them ever moving. If we did want to start moving data
 // in the GC, we'd need to allocate the goroutine structs from an
 // alternate arena. Using guintptr doesn't make that problem any worse.
+// Note that pollDesc.rg, pollDesc.wg also store g in uintptr form,
+// so they would need to be updated too if g's start moving.
 type guintptr uintptr
 
 //go:nosplit
@@ -538,7 +540,7 @@ type m struct {
 	printlock     int8
 	incgo         bool   // m is executing a cgo call
 	freeWait      uint32 // if == 0, safe to free g0 and delete m (atomic)
-	fastrand      [2]uint32
+	fastrand      uint64
 	needextram    bool
 	traceback     uint8
 	ncgocall      uint64      // number of cgo calls in total
@@ -734,6 +736,12 @@ type p struct {
 	// Race context used while executing timer functions.
 	timerRaceCtx uintptr
 
+	// scannableStackSizeDelta accumulates the amount of stack space held by
+	// live goroutines (i.e. those eligible for stack scanning).
+	// Flushed to gcController.scannableStackSize once scannableStackSizeSlack
+	// or -scannableStackSizeSlack is reached.
+	scannableStackSizeDelta int64
+
 	// preempt is set to indicate that this P should be enter the
 	// scheduler ASAP (regardless of what G is running on it).
 	preempt bool
@@ -858,8 +866,8 @@ const (
 // Keep in sync with linker (../cmd/link/internal/ld/pcln.go:/pclntab)
 // and with package debug/gosym and with symtab.go in package runtime.
 type _func struct {
-	entry   uintptr // start pc
-	nameoff int32   // function name
+	entryoff uint32 // start pc, as offset from moduledata.text/pcHeader.textStart
+	nameoff  int32  // function name
 
 	args        int32  // in/out args size
 	deferreturn uint32 // offset of start of a deferreturn call instruction from entry, if any.
@@ -879,8 +887,8 @@ type _func struct {
 // A *Func can be either a *_func or a *funcinl, and they are distinguished
 // by the first uintptr.
 type funcinl struct {
-	zero  uintptr // set to 0 to distinguish from _func
-	entry uintptr // entry of the real (the "outermost") frame.
+	ones  uint32  // set to ^0 to distinguish from _func
+	entry uintptr // entry of the real (the "outermost") frame
 	name  string
 	file  string
 	line  int
@@ -976,7 +984,7 @@ type _defer struct {
 // adjustment takes care of them.
 type _panic struct {
 	argp      unsafe.Pointer // pointer to arguments of deferred call run during panic; cannot move - known to liblink
-	arg       interface{}    // argument to panic
+	arg       any            // argument to panic
 	link      *_panic        // link to earlier panic
 	pc        uintptr        // where to return to in runtime if this panic is bypassed
 	sp        unsafe.Pointer // where to return to in runtime if this panic is bypassed

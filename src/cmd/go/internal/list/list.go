@@ -23,8 +23,8 @@ import (
 	"cmd/go/internal/load"
 	"cmd/go/internal/modinfo"
 	"cmd/go/internal/modload"
+	"cmd/go/internal/str"
 	"cmd/go/internal/work"
-	"cmd/internal/str"
 )
 
 var CmdList = &base.Command{
@@ -358,9 +358,9 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 		}
 	}
 
-	var do func(interface{})
+	var do func(any)
 	if *listJson {
-		do = func(x interface{}) {
+		do = func(x any) {
 			b, err := json.MarshalIndent(x, "", "\t")
 			if err != nil {
 				out.Flush()
@@ -386,7 +386,7 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 		if err != nil {
 			base.Fatalf("%s", err)
 		}
-		do = func(x interface{}) {
+		do = func(x any) {
 			if err := tmpl.Execute(out, x); err != nil {
 				out.Flush()
 				base.Fatalf("%s", err)
@@ -427,12 +427,12 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 		}
 
 		if modload.Init(); !modload.Enabled() {
-			base.Fatalf("go list -m: not using modules")
+			base.Fatalf("go: list -m cannot be used with GO111MODULE=off")
 		}
 
 		modload.LoadModFile(ctx) // Sets cfg.BuildMod as a side-effect.
 		if cfg.BuildMod == "vendor" {
-			const actionDisabledFormat = "go list -m: can't %s using the vendor directory\n\t(Use -mod=mod or -mod=readonly to bypass.)"
+			const actionDisabledFormat = "go: can't %s using the vendor directory\n\t(Use -mod=mod or -mod=readonly to bypass.)"
 
 			if *listVersions {
 				base.Fatalf(actionDisabledFormat, "determine available versions")
@@ -471,11 +471,11 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 		if !*listE {
 			for _, m := range mods {
 				if m.Error != nil {
-					base.Errorf("go list -m: %v", m.Error.Err)
+					base.Errorf("go: %v", m.Error.Err)
 				}
 			}
 			if err != nil {
-				base.Errorf("go list -m: %v", err)
+				base.Errorf("go: %v", err)
 			}
 			base.ExitIfErrors()
 		}
@@ -711,7 +711,7 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 			}
 			rmods, err := modload.ListModules(ctx, args, mode)
 			if err != nil && !*listE {
-				base.Errorf("go list -retracted: %v", err)
+				base.Errorf("go: %v", err)
 			}
 			for i, arg := range args {
 				rmod := rmods[i]

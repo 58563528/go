@@ -29,6 +29,7 @@ const (
 	riscv64REG_CTXT = 20
 	riscv64REG_LR   = 1
 	riscv64REG_SP   = 2
+	riscv64REG_GP   = 3
 	riscv64REG_TP   = 4
 	riscv64REG_TMP  = 31
 	riscv64REG_ZERO = 0
@@ -80,8 +81,8 @@ func init() {
 
 		// Add general purpose registers to gpMask.
 		switch r {
-		// ZERO, TP and TMP are not in any gp mask.
-		case riscv64REG_ZERO, riscv64REG_TP, riscv64REG_TMP:
+		// ZERO, GP, TP and TMP are not in any gp mask.
+		case riscv64REG_ZERO, riscv64REG_GP, riscv64REG_TP, riscv64REG_TMP:
 		case riscv64REG_G:
 			gpgMask |= mask
 			gpspsbgMask |= mask
@@ -132,6 +133,7 @@ func init() {
 
 		fp11    = regInfo{inputs: []regMask{fpMask}, outputs: []regMask{fpMask}}
 		fp21    = regInfo{inputs: []regMask{fpMask, fpMask}, outputs: []regMask{fpMask}}
+		fp31    = regInfo{inputs: []regMask{fpMask, fpMask, fpMask}, outputs: []regMask{fpMask}}
 		gpfp    = regInfo{inputs: []regMask{gpMask}, outputs: []regMask{fpMask}}
 		fpgp    = regInfo{inputs: []regMask{fpMask}, outputs: []regMask{gpMask}}
 		fpstore = regInfo{inputs: []regMask{gpspsbMask, fpMask, 0}}
@@ -239,9 +241,10 @@ func init() {
 		{name: "MOVconvert", argLength: 2, reg: gp11, asm: "MOV"}, // arg0, but converted to int/ptr as appropriate; arg1=mem
 
 		// Calls
-		{name: "CALLstatic", argLength: 1, reg: call, aux: "CallOff", call: true},         // call static function aux.(*gc.Sym). arg0=mem, auxint=argsize, returns mem
-		{name: "CALLclosure", argLength: 3, reg: callClosure, aux: "CallOff", call: true}, // call function via closure. arg0=codeptr, arg1=closure, arg2=mem, auxint=argsize, returns mem
-		{name: "CALLinter", argLength: 2, reg: callInter, aux: "CallOff", call: true},     // call fn by pointer. arg0=codeptr, arg1=mem, auxint=argsize, returns mem
+		{name: "CALLstatic", argLength: 1, reg: call, aux: "CallOff", call: true},               // call static function aux.(*gc.Sym). arg0=mem, auxint=argsize, returns mem
+		{name: "CALLtail", argLength: 1, reg: call, aux: "CallOff", call: true, tailCall: true}, // tail call static function aux.(*gc.Sym). arg0=mem, auxint=argsize, returns mem
+		{name: "CALLclosure", argLength: 3, reg: callClosure, aux: "CallOff", call: true},       // call function via closure. arg0=codeptr, arg1=closure, arg2=mem, auxint=argsize, returns mem
+		{name: "CALLinter", argLength: 2, reg: callInter, aux: "CallOff", call: true},           // call fn by pointer. arg0=codeptr, arg1=mem, auxint=argsize, returns mem
 
 		// duffzero
 		// arg0 = address of memory to zero (in X10, changed as side effect)
@@ -425,8 +428,14 @@ func init() {
 		{name: "FSUBD", argLength: 2, reg: fp21, asm: "FSUBD", commutative: false, typ: "Float64"},                                          // arg0 - arg1
 		{name: "FMULD", argLength: 2, reg: fp21, asm: "FMULD", commutative: true, typ: "Float64"},                                           // arg0 * arg1
 		{name: "FDIVD", argLength: 2, reg: fp21, asm: "FDIVD", commutative: false, typ: "Float64"},                                          // arg0 / arg1
+		{name: "FMADDD", argLength: 3, reg: fp31, asm: "FMADDD", commutative: true, typ: "Float64"},                                         // (arg0 * arg1) + arg2
+		{name: "FMSUBD", argLength: 3, reg: fp31, asm: "FMSUBD", commutative: true, typ: "Float64"},                                         // (arg0 * arg1) - arg2
+		{name: "FNMADDD", argLength: 3, reg: fp31, asm: "FNMADDD", commutative: true, typ: "Float64"},                                       // -(arg0 * arg1) + arg2
+		{name: "FNMSUBD", argLength: 3, reg: fp31, asm: "FNMSUBD", commutative: true, typ: "Float64"},                                       // -(arg0 * arg1) - arg2
 		{name: "FSQRTD", argLength: 1, reg: fp11, asm: "FSQRTD", typ: "Float64"},                                                            // sqrt(arg0)
 		{name: "FNEGD", argLength: 1, reg: fp11, asm: "FNEGD", typ: "Float64"},                                                              // -arg0
+		{name: "FABSD", argLength: 1, reg: fp11, asm: "FABSD", typ: "Float64"},                                                              // abs(arg0)
+		{name: "FSGNJD", argLength: 2, reg: fp21, asm: "FSGNJD", typ: "Float64"},                                                            // copy sign of arg1 to arg0
 		{name: "FMVDX", argLength: 1, reg: gpfp, asm: "FMVDX", typ: "Float64"},                                                              // reinterpret arg0 as float
 		{name: "FCVTDW", argLength: 1, reg: gpfp, asm: "FCVTDW", typ: "Float64"},                                                            // float64(low 32 bits of arg0)
 		{name: "FCVTDL", argLength: 1, reg: gpfp, asm: "FCVTDL", typ: "Float64"},                                                            // float64(arg0)
